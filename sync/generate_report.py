@@ -540,8 +540,12 @@ def _cause_text(excs: list[dict]) -> str:
 def build_hbl_inv(ir: dict) -> str:
     bol = (ir.get("bol_number") or "").strip()
     inv = (ir.get("inv_numbers") or "").strip()
-    parts = [p for p in [bol, inv] if p]
-    return " &middot; ".join(_esc(p) for p in parts) if parts else "—"
+    lines: list[str] = []
+    if bol:
+        lines.append(f'<span style="display:block;">{_esc(bol)}</span>')
+    if inv:
+        lines.append(f'<span style="display:block;color:#666;">{_esc(inv)}</span>')
+    return "".join(lines) if lines else "—"
 
 
 def _inbound_via(c: dict, internal: dict) -> str:
