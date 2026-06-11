@@ -263,14 +263,26 @@ def parse_container_row(shipment: dict, meta: dict) -> dict:
     pod_info  = route.get("port_of_discharge") or {}
     carrier   = shipment.get("carrier") or {}
 
+    vessels_seen: list = []   # [(vessel_name, location_name)]
     vessel_name   = None
     voyage_number = None
     for m in ((shipment.get("containers") or [{}])[0].get("movements") or []):
         v = (m.get("vessel") or {}).get("name")
         if v:
+            vessels_seen.append((v, (m.get("location") or {}).get("name")))
             vessel_name   = v
             voyage_number = m.get("voyage")
-            break
+
+    distinct_vessels = list(dict.fromkeys(name for name, _ in vessels_seen))
+    is_transshipment = len(distinct_vessels) > 1
+    ts_port = None
+    if is_transshipment:
+        prev = None
+        for v_name, loc_name in vessels_seen:
+            if prev is not None and v_name != prev:
+                ts_port = loc_name
+                break
+            prev = v_name
 
     map_token = (shipment.get("tokens") or {}).get("map")
 
@@ -291,6 +303,8 @@ def parse_container_row(shipment: dict, meta: dict) -> dict:
         "status":              shipment.get("status") or "UNKNOWN",
         "shipsgo_tracking_id": str(shipment["id"]),
         "last_synced_at":      dt.datetime.now(dt.timezone.utc).isoformat(),
+        "is_transshipment":    is_transshipment,
+        "ts_port":             ts_port,
     }
 
 
@@ -356,12 +370,14 @@ def parse_events(shipment: dict, meta: dict, existing_eta: dt.date | None) -> li
 UPSERT_CONTAINER_SQL = """
 INSERT INTO containers
     (container_id, bol_number, import_number, ship_via, carrier, vessel, voyage, map_token,
-     pol, pod, etd, eta, actual_arrival, status, shipsgo_tracking_id, last_synced_at)
+     pol, pod, etd, eta, actual_arrival, status, shipsgo_tracking_id, last_synced_at,
+     is_transshipment, ts_port)
 VALUES
     (%(container_id)s, %(bol_number)s, %(import_number)s, %(ship_via)s, %(carrier)s,
      %(vessel)s, %(voyage)s, %(map_token)s, %(pol)s, %(pod)s,
      %(etd)s, %(eta)s, %(actual_arrival)s, %(status)s,
-     %(shipsgo_tracking_id)s, %(last_synced_at)s)
+     %(shipsgo_tracking_id)s, %(last_synced_at)s,
+     %(is_transshipment)s, %(ts_port)s)
 ON CONFLICT (container_id) DO UPDATE SET
     bol_number          = EXCLUDED.bol_number,
     import_number       = EXCLUDED.import_number,
@@ -377,7 +393,9 @@ ON CONFLICT (container_id) DO UPDATE SET
     actual_arrival      = EXCLUDED.actual_arrival,
     status              = EXCLUDED.status,
     shipsgo_tracking_id = EXCLUDED.shipsgo_tracking_id,
-    last_synced_at      = EXCLUDED.last_synced_at
+    last_synced_at      = EXCLUDED.last_synced_at,
+    is_transshipment    = EXCLUDED.is_transshipment,
+    ts_port             = EXCLUDED.ts_port
 """
 
 INSERT_EVENT_SQL = """
