@@ -436,21 +436,26 @@ def _esc(s) -> str:
             .replace(">", "&gt;"))
 
 
-_GENERIC_VESSELS = frozenset({"FEEDER VESSEL", "FEEDER", "RAILWAY", "RAIL", "TRUCK", "BARGE"})
-
-
 def _fmt_vessel(c: dict) -> str:
-    """Format vessel for display: plain, 'current → mother', or 'via hub → mother'."""
+    """Format vessel for display: plain, or 'current → mother' when transshipped."""
     mother  = (c.get("vessel") or "").strip()
     current = (c.get("current_vessel") or "").strip()
     is_ts   = c.get("is_transshipment") or False
-    ts_p    = (c.get("ts_port") or "").strip()
-    if not is_ts or not mother:
-        return _esc(mother) if mother else "—"
-    if current and current.upper() not in _GENERIC_VESSELS and current != mother:
+    if not mother:
+        return "—"
+    if is_ts and current and current.upper() != mother.upper():
         return f"{_esc(current)} &rarr; {_esc(mother)}"
-    via = ts_p or "transshipment"
-    return f"via {_esc(via)} &rarr; {_esc(mother)}"
+    return _esc(mother)
+
+
+def _fmt_vessel_plain(c: dict) -> str:
+    """Plain-text vessel for Excel: 'current → mother' or just 'mother'."""
+    mother  = (c.get("vessel") or "").strip()
+    current = (c.get("current_vessel") or "").strip()
+    is_ts   = c.get("is_transshipment") or False
+    if is_ts and current and current.upper() != mother.upper():
+        return f"{current} → {mother}"
+    return mother
 
 
 def _track_link(shipsgo_id: str | None, map_token: str | None) -> str:
@@ -965,7 +970,7 @@ def build_xlsx(containers: list[dict], eta_slipped: set, internal: dict):
             dest_label,
             c.get("container_id") or "",
             c.get("status") or "",
-            c.get("vessel") or "",
+            _fmt_vessel_plain(c),
             c.get("voyage") or "",
             c.get("carrier") or "",
             c.get("pod") or "",

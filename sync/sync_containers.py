@@ -267,7 +267,6 @@ def parse_container_row(shipment: dict, meta: dict) -> dict:
     mother_voyage  = None
     current_vessel = None
     ts_port        = None
-    imo_names:     list[str] = []
     prev_v_name    = None
 
     for m in ((shipment.get("containers") or [{}])[0].get("movements") or []):
@@ -283,15 +282,13 @@ def parse_container_row(shipment: dict, meta: dict) -> dict:
                 ts_port = (m.get("location") or {}).get("name")
             mother_vessel = v_name
             mother_voyage = m.get("voyage")
-            if not imo_names or imo_names[-1] != v_name:
-                imo_names.append(v_name)
 
         if v_name:
             prev_v_name = v_name
 
-    is_transshipment = (
-        bool(mother_vessel and current_vessel and mother_vessel != current_vessel)
-        or len(set(imo_names)) > 1
+    is_transshipment = bool(
+        current_vessel and mother_vessel
+        and current_vessel.strip().upper() != mother_vessel.strip().upper()
     )
     if not is_transshipment:
         ts_port = None
@@ -304,7 +301,7 @@ def parse_container_row(shipment: dict, meta: dict) -> dict:
         "import_number":       meta.get("import_number"),
         "ship_via":            meta.get("ship_via"),
         "carrier":             carrier.get("name") or meta.get("carrier_name"),
-        "vessel":              mother_vessel or current_vessel,
+        "vessel":              mother_vessel,
         "voyage":              mother_voyage,
         "current_vessel":      current_vessel,
         "map_token":           map_token,
