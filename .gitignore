@@ -1,0 +1,7 @@
+.env
+__pycache__/
+*.pyc
+_reports/
+_excel/
+sync_runner.log
+runs/
