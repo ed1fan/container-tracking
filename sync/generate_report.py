@@ -444,21 +444,22 @@ def _route_breadcrumb(legs: list, current_leg: int) -> str:
     parts: list[str] = []
     for i, node in enumerate(legs):
         if node["type"] == "port":
-            name    = _esc(node.get("name") or "")
-            label   = node.get("label") or ""
-            raw_dt  = node.get("date")
-            date_s  = ""
-            if raw_dt:
-                try:
-                    d = dt.date.fromisoformat(str(raw_dt)[:10])
-                    date_s = d.strftime("%b") + " " + str(d.day)
-                except Exception:
-                    pass
-            sub = (label + " " + date_s).strip()
-            inner = f'<span style="font-size:11px;color:rgba(255,255,255,0.65);">{name}</span>'
-            if sub:
-                inner += (f'<span style="font-size:10px;color:rgba(255,255,255,0.4);">'
-                          f'{_esc(sub)}</span>')
+            name   = _esc(node.get("name") or "")
+            inner  = f'<span style="font-size:11px;color:rgba(255,255,255,0.65);">{name}</span>'
+            for ev in (node.get("events") or []):
+                code  = _esc(ev.get("code") or "")
+                raw_d = ev.get("date")
+                date_s = ""
+                if raw_d:
+                    try:
+                        d = dt.date.fromisoformat(str(raw_d)[:10])
+                        date_s = d.strftime("%b") + " " + str(d.day)
+                    except Exception:
+                        pass
+                ev_text = (code + " " + date_s).strip()
+                if ev_text:
+                    inner += (f'<span style="font-size:10px;color:rgba(255,255,255,0.4);">'
+                              f'{ev_text}</span>')
             parts.append(
                 f'<span style="display:inline-flex;flex-direction:column;'
                 f'align-items:center;gap:1px;">{inner}</span>'
