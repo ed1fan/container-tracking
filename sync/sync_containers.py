@@ -24,6 +24,7 @@ from pathlib import Path
 import httpx
 import psycopg
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 from dotenv import load_dotenv
 
 # ---------------------------------------------------------------------------
@@ -256,6 +257,62 @@ def _parse_date(val) -> dt.date | None:
         return None
 
 
+def _build_route_legs(movements: list, pod_info: dict) -> tuple[list, int]:
+    """Build route_legs list and current_leg index from Shipsgo movements."""
+    legs: list[dict] = []
+    last_act_idx = -1
+    prev_vessel: str | None = None
+
+    for m in movements:
+        mv     = m.get("vessel") or {}
+        v_name = mv.get("name")
+        if not v_name:
+            continue
+        v_imo  = mv.get("imo")
+        v_voy  = m.get("voyage") or mv.get("voyage")
+        m_stat = (m.get("status") or "").upper()
+        loc    = m.get("location") or {}
+        m_date = m.get("date")
+
+        # Port node: departure of this leg (skip if already last port)
+        loc_name = loc.get("name")
+        if loc_name and not (legs and legs[-1]["type"] == "port" and legs[-1]["name"] == loc_name):
+            legs.append({"type": "port", "name": loc_name, "code": loc.get("code"),
+                         "date": str(m_date)[:10] if m_date else None, "label": None})
+
+        # Vessel node: only when vessel name changes
+        if v_name != prev_vessel:
+            vessel_idx = len(legs)
+            legs.append({"type": "vessel", "name": v_name, "voyage": v_voy, "imo": v_imo})
+            if m_stat == "ACT":
+                last_act_idx = vessel_idx
+            prev_vessel = v_name
+
+    # Final port: POD from route info
+    pod_loc  = pod_info.get("location") or {}
+    pod_name = pod_loc.get("name")
+    pod_date = pod_info.get("date_of_discharge")
+    if pod_name and not (legs and legs[-1]["type"] == "port" and legs[-1]["name"] == pod_name):
+        legs.append({"type": "port", "name": pod_name, "code": pod_loc.get("code"),
+                     "date": str(pod_date)[:10] if pod_date else None, "label": None})
+
+    # Label first and last port
+    port_nodes = [n for n in legs if n["type"] == "port"]
+    if port_nodes:
+        port_nodes[0]["label"] = "ETD"
+        if len(port_nodes) > 1:
+            port_nodes[-1]["label"] = "ETA"
+
+    # current_leg: last ACT vessel node; fall back to last vessel node
+    if last_act_idx >= 0:
+        current_leg = last_act_idx
+    else:
+        vessel_idxs = [i for i, n in enumerate(legs) if n["type"] == "vessel"]
+        current_leg = vessel_idxs[-1] if vessel_idxs else 0
+
+    return legs, current_leg
+
+
 def parse_container_row(shipment: dict, meta: dict) -> dict:
     """Map Shipsgo shipment detail to our containers table row."""
     route = shipment.get("route") or {}
@@ -293,6 +350,9 @@ def parse_container_row(shipment: dict, meta: dict) -> dict:
     if not is_transshipment:
         ts_port = None
 
+    movements  = (shipment.get("containers") or [{}])[0].get("movements") or []
+    legs, current_leg = _build_route_legs(movements, pod_info)
+
     map_token = (shipment.get("tokens") or {}).get("map")
 
     return {
@@ -315,6 +375,8 @@ def parse_container_row(shipment: dict, meta: dict) -> dict:
         "last_synced_at":      dt.datetime.now(dt.timezone.utc).isoformat(),
         "is_transshipment":    is_transshipment,
         "ts_port":             ts_port,
+        "route_legs":          Jsonb(legs) if legs else None,
+        "current_leg":         current_leg,
     }
 
 
@@ -382,13 +444,13 @@ INSERT INTO containers
     (container_id, bol_number, import_number, ship_via, carrier, vessel, voyage,
      current_vessel, map_token,
      pol, pod, etd, eta, actual_arrival, status, shipsgo_tracking_id, last_synced_at,
-     is_transshipment, ts_port)
+     is_transshipment, ts_port, route_legs, current_leg)
 VALUES
     (%(container_id)s, %(bol_number)s, %(import_number)s, %(ship_via)s, %(carrier)s,
      %(vessel)s, %(voyage)s, %(current_vessel)s, %(map_token)s, %(pol)s, %(pod)s,
      %(etd)s, %(eta)s, %(actual_arrival)s, %(status)s,
      %(shipsgo_tracking_id)s, %(last_synced_at)s,
-     %(is_transshipment)s, %(ts_port)s)
+     %(is_transshipment)s, %(ts_port)s, %(route_legs)s, %(current_leg)s)
 ON CONFLICT (container_id) DO UPDATE SET
     bol_number          = EXCLUDED.bol_number,
     import_number       = EXCLUDED.import_number,
@@ -407,7 +469,9 @@ ON CONFLICT (container_id) DO UPDATE SET
     shipsgo_tracking_id = EXCLUDED.shipsgo_tracking_id,
     last_synced_at      = EXCLUDED.last_synced_at,
     is_transshipment    = EXCLUDED.is_transshipment,
-    ts_port             = EXCLUDED.ts_port
+    ts_port             = EXCLUDED.ts_port,
+    route_legs          = EXCLUDED.route_legs,
+    current_leg         = EXCLUDED.current_leg
 """
 
 INSERT_EVENT_SQL = """

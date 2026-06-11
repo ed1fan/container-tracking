@@ -1,0 +1,2 @@
+ALTER TABLE containers ADD COLUMN IF NOT EXISTS route_legs JSONB;
+ALTER TABLE containers ADD COLUMN IF NOT EXISTS current_leg INT;

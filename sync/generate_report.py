@@ -65,7 +65,7 @@ SHIPVIA_DEST = {
 CONTAINERS_SQL = """
 SELECT container_id, status, vessel, voyage, current_vessel, carrier, bol_number,
        import_number, ship_via, pod, eta, etd, map_token, shipsgo_tracking_id,
-       is_transshipment, ts_port, closed_at, last_synced_at
+       is_transshipment, ts_port, route_legs, current_leg, closed_at, last_synced_at
 FROM containers
 ORDER BY eta ASC NULLS LAST
 """
@@ -436,6 +436,49 @@ def _esc(s) -> str:
             .replace(">", "&gt;"))
 
 
+def _route_breadcrumb(legs: list, current_leg: int) -> str:
+    """Render journey breadcrumb HTML for vessel group header banners."""
+    if not legs:
+        return ""
+    arrow = '<span style="color:rgba(255,255,255,0.4);margin:0 4px;">&rarr;</span>'
+    parts: list[str] = []
+    for i, node in enumerate(legs):
+        if node["type"] == "port":
+            name    = _esc(node.get("name") or "")
+            label   = node.get("label") or ""
+            raw_dt  = node.get("date")
+            date_s  = ""
+            if raw_dt:
+                try:
+                    d = dt.date.fromisoformat(str(raw_dt)[:10])
+                    date_s = d.strftime("%b") + " " + str(d.day)
+                except Exception:
+                    pass
+            sub = (label + " " + date_s).strip()
+            inner = f'<span style="font-size:11px;color:rgba(255,255,255,0.65);">{name}</span>'
+            if sub:
+                inner += (f'<span style="font-size:10px;color:rgba(255,255,255,0.4);">'
+                          f'{_esc(sub)}</span>')
+            parts.append(
+                f'<span style="display:inline-flex;flex-direction:column;'
+                f'align-items:center;gap:1px;">{inner}</span>'
+            )
+        else:
+            name   = _esc(node.get("name") or "")
+            voyage = _esc(node.get("voyage") or "")
+            label  = f"{name}&nbsp;{voyage}" if voyage else name
+            if i == current_leg:
+                parts.append(
+                    f'<span style="font-size:11px;color:#FFD54F;font-weight:bold;'
+                    f'font-style:italic;">{label}</span>'
+                )
+            else:
+                parts.append(
+                    f'<span style="font-size:11px;color:rgba(255,255,255,0.65);">{label}</span>'
+                )
+    return arrow.join(parts)
+
+
 def _fmt_vessel(c: dict) -> str:
     """Format vessel for display: plain, or 'current → mother' when transshipped."""
     mother  = (c.get("vessel") or "").strip()
@@ -533,7 +576,18 @@ def _vessel_hdr(group_key, members: list) -> str:
     if etas:
         parts.append(f"ETA:&nbsp;{_fmt_date_short(max(etas))}")
     parts.append(f"{n}&nbsp;container{'s' if n != 1 else ''}")
-    return "&nbsp;&nbsp;|&nbsp;&nbsp;".join(parts)
+    header_line = "&nbsp;&nbsp;|&nbsp;&nbsp;".join(parts)
+
+    legs        = first_c.get("route_legs") or []
+    current_leg = first_c.get("current_leg") or 0
+    breadcrumb  = _route_breadcrumb(legs, current_leg)
+    if breadcrumb:
+        return (
+            f'{header_line}<br>'
+            f'<span style="font-weight:normal;font-size:10px;line-height:1.8;">'
+            f'{breadcrumb}</span>'
+        )
+    return header_line
 
 
 # ---------------------------------------------------------------------------
