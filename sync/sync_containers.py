@@ -263,26 +263,38 @@ def parse_container_row(shipment: dict, meta: dict) -> dict:
     pod_info  = route.get("port_of_discharge") or {}
     carrier   = shipment.get("carrier") or {}
 
-    vessels_seen: list = []   # [(vessel_name, location_name)]
-    vessel_name   = None
-    voyage_number = None
-    for m in ((shipment.get("containers") or [{}])[0].get("movements") or []):
-        v = (m.get("vessel") or {}).get("name")
-        if v:
-            vessels_seen.append((v, (m.get("location") or {}).get("name")))
-            vessel_name   = v
-            voyage_number = m.get("voyage")
+    mother_vessel  = None
+    mother_voyage  = None
+    current_vessel = None
+    ts_port        = None
+    imo_names:     list[str] = []
+    prev_v_name    = None
 
-    distinct_vessels = list(dict.fromkeys(name for name, _ in vessels_seen))
-    is_transshipment = len(distinct_vessels) > 1
-    ts_port = None
-    if is_transshipment:
-        prev = None
-        for v_name, loc_name in vessels_seen:
-            if prev is not None and v_name != prev:
-                ts_port = loc_name
-                break
-            prev = v_name
+    for m in ((shipment.get("containers") or [{}])[0].get("movements") or []):
+        mv     = m.get("vessel") or {}
+        v_name = mv.get("name")
+        v_imo  = mv.get("imo")
+
+        if v_name:
+            current_vessel = v_name
+
+        if v_name and v_imo:
+            if ts_port is None and prev_v_name and prev_v_name != v_name:
+                ts_port = (m.get("location") or {}).get("name")
+            mother_vessel = v_name
+            mother_voyage = m.get("voyage")
+            if not imo_names or imo_names[-1] != v_name:
+                imo_names.append(v_name)
+
+        if v_name:
+            prev_v_name = v_name
+
+    is_transshipment = (
+        bool(mother_vessel and current_vessel and mother_vessel != current_vessel)
+        or len(set(imo_names)) > 1
+    )
+    if not is_transshipment:
+        ts_port = None
 
     map_token = (shipment.get("tokens") or {}).get("map")
 
@@ -292,8 +304,9 @@ def parse_container_row(shipment: dict, meta: dict) -> dict:
         "import_number":       meta.get("import_number"),
         "ship_via":            meta.get("ship_via"),
         "carrier":             carrier.get("name") or meta.get("carrier_name"),
-        "vessel":              vessel_name,
-        "voyage":              voyage_number,
+        "vessel":              mother_vessel or current_vessel,
+        "voyage":              mother_voyage,
+        "current_vessel":      current_vessel,
         "map_token":           map_token,
         "pol":                 (pol_info.get("location") or {}).get("code"),
         "pod":                 (pod_info.get("location") or {}).get("code") or meta.get("pod"),
@@ -369,12 +382,13 @@ def parse_events(shipment: dict, meta: dict, existing_eta: dt.date | None) -> li
 
 UPSERT_CONTAINER_SQL = """
 INSERT INTO containers
-    (container_id, bol_number, import_number, ship_via, carrier, vessel, voyage, map_token,
+    (container_id, bol_number, import_number, ship_via, carrier, vessel, voyage,
+     current_vessel, map_token,
      pol, pod, etd, eta, actual_arrival, status, shipsgo_tracking_id, last_synced_at,
      is_transshipment, ts_port)
 VALUES
     (%(container_id)s, %(bol_number)s, %(import_number)s, %(ship_via)s, %(carrier)s,
-     %(vessel)s, %(voyage)s, %(map_token)s, %(pol)s, %(pod)s,
+     %(vessel)s, %(voyage)s, %(current_vessel)s, %(map_token)s, %(pol)s, %(pod)s,
      %(etd)s, %(eta)s, %(actual_arrival)s, %(status)s,
      %(shipsgo_tracking_id)s, %(last_synced_at)s,
      %(is_transshipment)s, %(ts_port)s)
@@ -385,6 +399,7 @@ ON CONFLICT (container_id) DO UPDATE SET
     carrier             = EXCLUDED.carrier,
     vessel              = EXCLUDED.vessel,
     voyage              = EXCLUDED.voyage,
+    current_vessel      = EXCLUDED.current_vessel,
     map_token           = EXCLUDED.map_token,
     pol                 = EXCLUDED.pol,
     pod                 = EXCLUDED.pod,

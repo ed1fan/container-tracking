@@ -63,8 +63,9 @@ SHIPVIA_DEST = {
 # ---------------------------------------------------------------------------
 
 CONTAINERS_SQL = """
-SELECT container_id, status, vessel, voyage, carrier, bol_number, import_number,
-       ship_via, pod, eta, etd, map_token, shipsgo_tracking_id, closed_at, last_synced_at
+SELECT container_id, status, vessel, voyage, current_vessel, carrier, bol_number,
+       import_number, ship_via, pod, eta, etd, map_token, shipsgo_tracking_id,
+       is_transshipment, ts_port, closed_at, last_synced_at
 FROM containers
 ORDER BY eta ASC NULLS LAST
 """
@@ -435,6 +436,23 @@ def _esc(s) -> str:
             .replace(">", "&gt;"))
 
 
+_GENERIC_VESSELS = frozenset({"FEEDER VESSEL", "FEEDER", "RAILWAY", "RAIL", "TRUCK", "BARGE"})
+
+
+def _fmt_vessel(c: dict) -> str:
+    """Format vessel for display: plain, 'current → mother', or 'via hub → mother'."""
+    mother  = (c.get("vessel") or "").strip()
+    current = (c.get("current_vessel") or "").strip()
+    is_ts   = c.get("is_transshipment") or False
+    ts_p    = (c.get("ts_port") or "").strip()
+    if not is_ts or not mother:
+        return _esc(mother) if mother else "—"
+    if current and current.upper() not in _GENERIC_VESSELS and current != mother:
+        return f"{_esc(current)} &rarr; {_esc(mother)}"
+    via = ts_p or "transshipment"
+    return f"via {_esc(via)} &rarr; {_esc(mother)}"
+
+
 def _track_link(shipsgo_id: str | None, map_token: str | None) -> str:
     if not shipsgo_id or not map_token:
         return '<span style="color:#aaa">—</span>'
@@ -499,7 +517,8 @@ def _vessel_hdr(group_key, members: list) -> str:
     etds     = [e for e in (_to_date(c.get("etd")) for c, _ in members) if e is not None]
     etas     = [e for e in (_to_date(c.get("eta")) for c, _ in members) if e is not None]
     carriers = [c.get("carrier") for c, _ in members if c.get("carrier")]
-    parts    = [_esc(vessel_name)]
+    first_c  = members[0][0] if members else {}
+    parts    = [_fmt_vessel(first_c)]
     if voyage:
         parts.append(f"Voyage:&nbsp;{_esc(voyage)}")
     if carriers:
