@@ -224,19 +224,6 @@ def fetch_shipment_detail(client: httpx.Client, shipment_id: int) -> dict | None
         return None
 
 
-def add_follower(client: httpx.Client, shipment_id: int, email: str) -> bool:
-    """POST /ocean/shipments/{id}/followers — adds a follower email.
-    409 = already added (fine). Returns True on success or already-added."""
-    try:
-        r = client.post(f"/ocean/shipments/{shipment_id}/followers", json={"follower": email})
-        if r.status_code in (200, 409):
-            return True
-        log.warning("  Could not add follower to shipment_id=%d: %d %s", shipment_id, r.status_code, r.text[:100])
-        return False
-    except Exception as exc:
-        log.warning("  add_follower failed for shipment_id=%d: %s", shipment_id, exc)
-        return False
-
 
 class StaleShipmentError(Exception):
     """Shipsgo returned 404 — shipment ID is from a different account; re-register."""
@@ -562,10 +549,6 @@ def main():
                     summary["errors"] += 1
                     continue
 
-                # Ensure follower is subscribed (safe to call every run — 409 = already added)
-                for email in SHIPSGO_FOLLOWERS:
-                    add_follower(client, shipment_id, email)
-                time.sleep(RATE_DELAY)
 
                 # Get existing ETA for delay comparison
                 existing_eta = None
