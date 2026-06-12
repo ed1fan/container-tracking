@@ -265,15 +265,16 @@ def _build_route_legs(movements: list, pod_info: dict) -> tuple[list, int]:
         v_voy    = m.get("voyage") or mv.get("voyage")
         m_stat   = (m.get("status") or "").upper()
         loc      = m.get("location") or {}
-        loc_code = loc.get("code")
-        loc_name = loc.get("name")
-        m_date   = m.get("date")
-        evt_code = (m.get("event_type") or m.get("event") or "").upper() or None
+        loc_code  = loc.get("code")
+        loc_name  = loc.get("name")
+        evt_code  = (m.get("event_type") or m.get("event") or "").upper() or None
+        timestamp = m.get("timestamp")
 
         # Build event entry for this movement
         ev: dict = {}
-        if evt_code: ev["code"] = evt_code
-        if m_date:   ev["date"] = str(m_date)[:10]
+        if evt_code:              ev["code"]   = evt_code
+        if timestamp:             ev["date"]   = timestamp
+        if m.get("status"):       ev["status"] = m.get("status")
 
         # Port node: deduplicate by code; append event to existing same-code port
         if loc_code or loc_name:

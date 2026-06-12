@@ -440,6 +440,15 @@ def _route_breadcrumb(legs: list, current_leg: int) -> str:
     """Render journey breadcrumb HTML for vessel group header banners."""
     if not legs:
         return ""
+
+    # Find last ACT event across all port nodes for current-event highlight
+    last_act_ev = None
+    for node in legs:
+        if node["type"] == "port":
+            for ev in (node.get("events") or []):
+                if (ev.get("status") or "").upper() == "ACT":
+                    last_act_ev = ev
+
     arrow = '<span style="color:rgba(255,255,255,0.4);margin:0 4px;">&rarr;</span>'
     parts: list[str] = []
     for i, node in enumerate(legs):
@@ -447,8 +456,9 @@ def _route_breadcrumb(legs: list, current_leg: int) -> str:
             name = _esc(node.get("name") or "")
             ev_cols: list[str] = []
             for ev in (node.get("events") or []):
-                code  = _esc(ev.get("code") or "")
-                raw_d = ev.get("date")
+                is_cur = (ev is last_act_ev)
+                code   = _esc(ev.get("code") or "")
+                raw_d  = ev.get("date")
                 date_s = ""
                 if raw_d:
                     try:
@@ -456,10 +466,16 @@ def _route_breadcrumb(legs: list, current_leg: int) -> str:
                         date_s = parsed.strftime("%b") + " " + str(parsed.day)
                     except Exception:
                         pass
+                if is_cur:
+                    code_style = "font-size:10px;color:#FFD54F;font-weight:bold;font-style:italic;"
+                    date_style = "font-size:10px;color:#FFD54F;font-style:italic;"
+                else:
+                    code_style = "font-size:10px;color:rgba(255,255,255,0.5);"
+                    date_style = "font-size:10px;color:rgba(255,255,255,0.4);"
                 ev_cols.append(
                     f'<span style="display:inline-flex;flex-direction:column;align-items:center;">'
-                    f'<span style="font-size:10px;color:rgba(255,255,255,0.5);">{code}</span>'
-                    f'<span style="font-size:10px;color:rgba(255,255,255,0.4);">{date_s}</span>'
+                    f'<span style="{code_style}">{code}</span>'
+                    f'<span style="{date_style}">{date_s}</span>'
                     f'</span>'
                 )
             events_row = ""
