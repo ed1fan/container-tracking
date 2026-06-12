@@ -257,14 +257,12 @@ def _build_route_legs(movements: list, pod_info: dict) -> tuple[list, int]:
         return None
 
     for m in movements:
-        mv       = m.get("vessel") or {}
-        v_name   = mv.get("name")
-        if not v_name:
-            continue
-        v_imo    = mv.get("imo")
-        v_voy    = m.get("voyage") or mv.get("voyage")
-        m_stat   = (m.get("status") or "").upper()
-        loc      = m.get("location") or {}
+        mv        = m.get("vessel") or {}
+        v_name    = mv.get("name") or None
+        v_imo     = mv.get("imo")
+        v_voy     = m.get("voyage") or mv.get("voyage")
+        m_stat    = (m.get("status") or "").upper()
+        loc       = m.get("location") or {}
         loc_code  = loc.get("code")
         loc_name  = loc.get("name")
         evt_code  = (m.get("event_type") or m.get("event") or "").upper() or None
@@ -272,11 +270,11 @@ def _build_route_legs(movements: list, pod_info: dict) -> tuple[list, int]:
 
         # Build event entry for this movement
         ev: dict = {}
-        if evt_code:              ev["code"]   = evt_code
-        if timestamp:             ev["date"]   = timestamp
-        if m.get("status"):       ev["status"] = m.get("status")
+        if evt_code:        ev["code"]   = evt_code
+        if timestamp:       ev["date"]   = timestamp
+        if m.get("status"): ev["status"] = m.get("status")
 
-        # Port node: deduplicate by code; append event to existing same-code port
+        # Port node: always emit (vessel may be null); deduplicate by code
         if loc_code or loc_name:
             lp = _last_port()
             if lp is not None and loc_code and lp.get("code") == loc_code:
@@ -290,8 +288,8 @@ def _build_route_legs(movements: list, pod_info: dict) -> tuple[list, int]:
                     "events": [ev] if ev else [],
                 })
 
-        # Vessel node: only when vessel name changes
-        if v_name != prev_vessel:
+        # Vessel node: only when v_name is non-null and has changed
+        if v_name and v_name != prev_vessel:
             vessel_idx = len(legs)
             legs.append({"type": "vessel", "name": v_name, "voyage": v_voy, "imo": v_imo})
             if m_stat == "ACT":
@@ -313,6 +311,20 @@ def _build_route_legs(movements: list, pod_info: dict) -> tuple[list, int]:
                 "code":   pod_code,
                 "events": [ev] if ev else [],
             })
+
+    # Post-process: add ETD label to first DEPA on origin port,
+    #               add ETA label to first ARRV on destination port
+    port_nodes = [n for n in legs if n["type"] == "port"]
+    if port_nodes:
+        for ev in (port_nodes[0].get("events") or []):
+            if (ev.get("code") or "") == "DEPA":
+                ev["label"] = "ETD"
+                break
+        if len(port_nodes) > 1:
+            for ev in (port_nodes[-1].get("events") or []):
+                if (ev.get("code") or "") == "ARRV":
+                    ev["label"] = "ETA"
+                    break
 
     # current_leg: last ACT vessel node; fall back to last vessel node
     if last_act_idx >= 0:
