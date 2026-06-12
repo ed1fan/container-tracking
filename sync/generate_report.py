@@ -444,25 +444,36 @@ def _route_breadcrumb(legs: list, current_leg: int) -> str:
     parts: list[str] = []
     for i, node in enumerate(legs):
         if node["type"] == "port":
-            name   = _esc(node.get("name") or "")
-            inner  = f'<span style="font-size:11px;color:rgba(255,255,255,0.65);">{name}</span>'
+            name = _esc(node.get("name") or "")
+            ev_cols: list[str] = []
             for ev in (node.get("events") or []):
                 code  = _esc(ev.get("code") or "")
                 raw_d = ev.get("date")
                 date_s = ""
                 if raw_d:
                     try:
-                        d = dt.date.fromisoformat(str(raw_d)[:10])
-                        date_s = d.strftime("%b") + " " + str(d.day)
+                        parsed = dt.datetime.fromisoformat(str(raw_d))
+                        date_s = parsed.strftime("%b") + " " + str(parsed.day)
                     except Exception:
                         pass
-                ev_text = (code + " " + date_s).strip()
-                if ev_text:
-                    inner += (f'<span style="font-size:10px;color:rgba(255,255,255,0.4);">'
-                              f'{ev_text}</span>')
+                ev_cols.append(
+                    f'<span style="display:inline-flex;flex-direction:column;align-items:center;">'
+                    f'<span style="font-size:10px;color:rgba(255,255,255,0.5);">{code}</span>'
+                    f'<span style="font-size:10px;color:rgba(255,255,255,0.4);">{date_s}</span>'
+                    f'</span>'
+                )
+            events_row = ""
+            if ev_cols:
+                events_row = (
+                    f'<span style="display:inline-flex;gap:10px;margin-top:2px;">'
+                    + "".join(ev_cols)
+                    + f'</span>'
+                )
             parts.append(
-                f'<span style="display:inline-flex;flex-direction:column;'
-                f'align-items:center;gap:1px;">{inner}</span>'
+                f'<span style="display:inline-flex;flex-direction:column;align-items:center;gap:1px;">'
+                f'<span style="font-size:11px;color:rgba(255,255,255,0.65);">{name}</span>'
+                f'{events_row}'
+                f'</span>'
             )
         else:
             name   = _esc(node.get("name") or "")
